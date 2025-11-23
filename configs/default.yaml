@@ -1,0 +1,34 @@
+name: default_experiment
+
+model:
+  name: distilgpt2
+  lora_r: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  use_quantization: false
+  max_length: 128
+
+data:
+  dataset: ag_news
+  partition_strategy: topic_skew
+  num_clients: 10
+  alpha: 0.1
+  style_criteria: length
+  skew_type: frequency
+  batch_size: 8
+  seed: 42
+
+federated:
+  algorithm: fedavg
+  num_rounds: 50
+  participation_rate: 1.0
+  local_epochs: 1
+  learning_rate: 0.00005
+  mu: 0.01
+
+eval_every: 5
+save_checkpoints: true
+checkpoint_dir: checkpoints
+results_dir: results
+seed: 42
+device: auto
