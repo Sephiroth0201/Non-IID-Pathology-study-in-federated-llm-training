@@ -163,7 +163,8 @@ def load_federated_dataset(
     partition: Dict[int, List[int]],
     batch_size: int = 8,
     max_length: int = 128,
-    split: str = 'train'
+    split: str = 'train',
+    max_samples: int = 0
 ) -> FederatedDataset:
     """
     Load a dataset and create federated dataset with given partition.
@@ -175,16 +176,21 @@ def load_federated_dataset(
         batch_size: Batch size for dataloaders
         max_length: Maximum sequence length
         split: Dataset split to use
+        max_samples: Limit samples (must match partitioner)
 
     Returns:
         FederatedDataset instance
     """
-    if dataset_name == 'wikitext':
-        dataset, _ = load_wikitext(tokenizer, max_length, split)
-    elif dataset_name == 'ag_news':
-        dataset, _, _ = load_ag_news(tokenizer, max_length, split)
-    else:
-        raise ValueError(f"Unknown dataset: {dataset_name}")
+    # Load raw data with same limit as partitioner
+    raw_data = create_raw_dataset_for_partitioning(dataset_name, split, max_samples)
+
+    # Create tokenized dataset from limited data
+    dataset = TextDataset(
+        texts=raw_data['text'],
+        tokenizer=tokenizer,
+        max_length=max_length,
+        labels=raw_data['label'] if raw_data['label'][0] != 0 or dataset_name == 'ag_news' else None
+    )
 
     return FederatedDataset(
         dataset=dataset,

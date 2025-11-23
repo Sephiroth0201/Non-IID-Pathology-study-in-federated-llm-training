@@ -106,7 +106,7 @@ class FedProx:
         global_params: Dict[str, torch.Tensor]
     ) -> Tuple[Dict[str, torch.Tensor], Dict[str, Any]]:
         """Train a single client and return updates."""
-        return self.clients[client_id].train(global_params, verbose=False)
+        return self.clients[client_id].train(global_params, verbose=True)
 
     def evaluate(self) -> Tuple[float, float]:
         """Evaluate global model on test data."""

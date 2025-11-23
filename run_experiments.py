@@ -41,9 +41,10 @@ def run_main_experiments(base_config: ExperimentConfig, quick: bool = False):
     """
     algorithms = ['fedavg', 'fedprox', 'scaffold']
     partitions = ['iid', 'topic_skew', 'style_skew', 'token_skew']
-    participation_rates = [1.0] if quick else [0.3, 0.5, 1.0]
+    # Simplified: only test 100% participation for speed
+    participation_rates = [1.0]
 
-    num_rounds = 10 if quick else base_config.federated.num_rounds
+    num_rounds = 2 if quick else base_config.federated.num_rounds
 
     results = {}
     total = len(algorithms) * len(partitions) * len(participation_rates)

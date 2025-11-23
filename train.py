@@ -22,7 +22,9 @@ from src.data.partitioner import NonIIDPartitioner
 from src.data.datasets import (
     prepare_federated_data,
     create_raw_dataset_for_partitioning,
-    SimpleDataset
+    load_federated_dataset,
+    SimpleDataset,
+    TextDataset
 )
 from src.models.lora_model import get_model_and_tokenizer, create_lora_model, get_device
 from src.federated.fedavg import FedAvg
@@ -132,15 +134,23 @@ def run_experiment(config: ExperimentConfig):
     partition_stats = partitioner.get_statistics(raw_dataset, partition)
     print(f"Partition statistics: {partition_stats['samples_per_client']}")
 
-    # Prepare federated data
+    # Prepare federated data (using same max_samples as partitioner)
     print("Preparing federated dataset...")
-    federated_data, test_loader = prepare_federated_data(
+    federated_data = load_federated_dataset(
         dataset_name=config.data.dataset,
         tokenizer=tokenizer,
-        partitioner=partitioner,
+        partition=partition,
         batch_size=config.data.batch_size,
-        max_length=config.model.max_length
+        max_length=config.model.max_length,
+        split='train',
+        max_samples=max_samples
     )
+
+    # Create test loader (small subset)
+    test_raw = create_raw_dataset_for_partitioning(config.data.dataset, 'test', max_samples=500)
+    test_dataset = TextDataset(test_raw['text'], tokenizer, config.model.max_length)
+    import torch
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=config.data.batch_size, shuffle=False)
 
     # Create client dataloaders
     client_dataloaders = {}
@@ -271,18 +281,16 @@ def main():
                        choices=['fedavg', 'fedprox', 'scaffold'])
     parser.add_argument('--partition', type=str, default='topic_skew',
                        choices=['iid', 'topic_skew', 'style_skew', 'token_skew'])
-    parser.add_argument('--num-clients', type=int, default=10)
-    parser.add_argument('--num-rounds', type=int, default=50)
-    parser.add_argument('--participation-rate', type=float, default=1.0)
-    parser.add_argument('--local-epochs', type=int, default=1)
-    parser.add_argument('--learning-rate', type=float, default=5e-5)
-    parser.add_argument('--mu', type=float, default=0.01, help='FedProx mu')
-    parser.add_argument('--alpha', type=float, default=0.1,
-                       help='Dirichlet alpha for topic_skew')
-    parser.add_argument('--batch-size', type=int, default=8)
-    parser.add_argument('--max-length', type=int, default=128)
-    parser.add_argument('--max-samples', type=int, default=0,
-                       help='Max training samples (0=all, use 1000-5000 for quick tests)')
+    parser.add_argument('-c', '--num-clients', type=int, default=3)
+    parser.add_argument('-r', '--num-rounds', type=int, default=3)
+    parser.add_argument('-p', '--participation-rate', type=float, default=1.0)
+    parser.add_argument('-e', '--local-epochs', type=int, default=1)
+    parser.add_argument('-lr', '--learning-rate', type=float, default=1e-4)
+    parser.add_argument('--mu', type=float, default=0.01)
+    parser.add_argument('--alpha', type=float, default=0.1)
+    parser.add_argument('-b', '--batch-size', type=int, default=32)
+    parser.add_argument('-l', '--max-length', type=int, default=64)
+    parser.add_argument('-n', '--max-samples', type=int, default=500)
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--device', type=str, default='auto')
     parser.add_argument('--results-dir', type=str, default='results')

@@ -104,7 +104,7 @@ class SCAFFOLD:
         global_control: Dict[str, torch.Tensor]
     ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], Dict[str, Any]]:
         """Train a single client with SCAFFOLD and return updates + control delta."""
-        return self.clients[client_id].train(global_params, global_control, verbose=False)
+        return self.clients[client_id].train(global_params, global_control, verbose=True)
 
     def evaluate(self) -> Tuple[float, float]:
         """Evaluate global model on test data."""

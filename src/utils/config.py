@@ -19,11 +19,11 @@ from typing import Dict, List, Optional, Any, Union
 class ModelConfig:
     """Model configuration."""
     name: str = 'distilgpt2'  # distilgpt2, gpt2, tinyllama, qwen-0.5b
-    lora_r: int = 8
-    lora_alpha: int = 16
+    lora_r: int = 4  # Reduced for speed
+    lora_alpha: int = 8  # Reduced for speed
     lora_dropout: float = 0.05
     use_quantization: bool = False
-    max_length: int = 128
+    max_length: int = 64  # Reduced for speed
 
 
 @dataclass
@@ -31,12 +31,12 @@ class DataConfig:
     """Data and partitioning configuration."""
     dataset: str = 'ag_news'  # wikitext, ag_news
     partition_strategy: str = 'topic_skew'  # iid, topic_skew, style_skew, token_skew
-    num_clients: int = 10
+    num_clients: int = 3  # Minimal for speed
     alpha: float = 0.1  # Dirichlet concentration (for topic_skew)
     style_criteria: str = 'length'  # For style_skew: length, formality, complexity
     skew_type: str = 'frequency'  # For token_skew: frequency, truncation, vocabulary
-    batch_size: int = 8
-    max_samples: int = 0  # 0 = all samples, >0 = limit for quick testing
+    batch_size: int = 32  # Large batch for speed
+    max_samples: int = 500  # Very small for fast testing
     seed: int = 42
 
 
@@ -44,10 +44,10 @@ class DataConfig:
 class FederatedConfig:
     """Federated learning configuration."""
     algorithm: str = 'fedavg'  # fedavg, fedprox, scaffold
-    num_rounds: int = 50
+    num_rounds: int = 3  # Minimal for speed
     participation_rate: float = 1.0
     local_epochs: int = 1
-    learning_rate: float = 5e-5
+    learning_rate: float = 1e-4  # Increased for faster convergence
     mu: float = 0.01  # FedProx proximal coefficient
 
 
