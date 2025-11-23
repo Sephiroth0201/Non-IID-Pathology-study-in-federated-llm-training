@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """
-Run experiments for Non-IID Pathology Study in Federated Learning.
+Experiment Runner for Non-IID Federated Learning Study
 
-Fast experiment runner for DistilBERT classification on AG News.
+Runs systematic experiments comparing FedAvg vs FedProx under different
+data heterogeneity conditions.
+
+Usage:
+    python run_experiments.py --mode quick     # Quick test (~5 min)
+    python run_experiments.py --mode main      # Full experiments (~15 min)
+    python run_experiments.py --mode failure   # Failure mode tests
+    python run_experiments.py --mode analyze   # Analyze existing results
 """
 
 import argparse
@@ -11,45 +18,85 @@ import os
 import subprocess
 import sys
 from datetime import datetime
-from itertools import product
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
 
-def run_single_experiment(algorithm, partition, num_clients, num_rounds, num_samples,
-                          batch_size=32, alpha=0.1, mu=0.01, lr=2e-5, seed=42):
-    """Run a single experiment and return results."""
+# =============================================================================
+# EXPERIMENT CONFIGURATIONS - Edit these for your experiments
+# =============================================================================
+
+# Quick experiments (for testing)
+QUICK_EXPERIMENTS = [
+    {'name': 'fedavg_iid', 'algorithm': 'fedavg', 'partition': 'iid'},
+    {'name': 'fedavg_noniid', 'algorithm': 'fedavg', 'partition': 'topic_skew'},
+    {'name': 'fedprox_noniid', 'algorithm': 'fedprox', 'partition': 'topic_skew'},
+]
+
+# Main experiments (full comparison)
+MAIN_EXPERIMENTS = [
+    {'name': 'fedavg_iid', 'algorithm': 'fedavg', 'partition': 'iid'},
+    {'name': 'fedavg_noniid', 'algorithm': 'fedavg', 'partition': 'topic_skew'},
+    {'name': 'fedprox_iid', 'algorithm': 'fedprox', 'partition': 'iid'},
+    {'name': 'fedprox_noniid', 'algorithm': 'fedprox', 'partition': 'topic_skew'},
+]
+
+# Failure mode experiments
+FAILURE_EXPERIMENTS = [
+    {'name': 'extreme_noniid', 'algorithm': 'fedavg', 'partition': 'topic_skew', 'alpha': 0.01},
+    {'name': 'fedprox_extreme', 'algorithm': 'fedprox', 'partition': 'topic_skew', 'alpha': 0.01},
+    {'name': 'high_lr', 'algorithm': 'fedavg', 'partition': 'topic_skew', 'lr': 1e-3},
+    {'name': 'many_clients', 'algorithm': 'fedavg', 'partition': 'topic_skew', 'clients': 10},
+]
+
+# Default parameters for all experiments
+DEFAULT_PARAMS = {
+    'clients': 5,
+    'rounds': 5,
+    'samples': 2000,
+    'batch': 32,
+    'alpha': 0.1,
+    'mu': 0.1,
+    'lr': 2e-5,
+    'local_epochs': 2,
+    'seed': 42,
+}
+
+# =============================================================================
+
+
+def run_experiment(config):
+    """Run a single experiment and return metrics."""
+    params = {**DEFAULT_PARAMS, **config}
+
     cmd = [
         sys.executable, 'train.py',
-        '-a', algorithm,
-        '-p', partition,
-        '-c', str(num_clients),
-        '-r', str(num_rounds),
-        '-n', str(num_samples),
-        '-b', str(batch_size),
-        '--alpha', str(alpha),
-        '--mu', str(mu),
-        '--lr', str(lr),
-        '--seed', str(seed)
+        '-a', params['algorithm'],
+        '-p', params['partition'],
+        '-c', str(params['clients']),
+        '-r', str(params['rounds']),
+        '-n', str(params['samples']),
+        '-b', str(params['batch']),
+        '-e', str(params['local_epochs']),
+        '--alpha', str(params['alpha']),
+        '--mu', str(params['mu']),
+        '--lr', str(params['lr']),
+        '--seed', str(params['seed']),
     ]
 
-    print(f"\nRunning: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"\n>>> {params['name']}")
+    print(f"    Command: {' '.join(cmd[1:])}")
 
-    # Parse output
+    result = subprocess.run(cmd, capture_output=True, text=True)
     output = result.stdout + result.stderr
     print(output)
 
-    # Extract final metrics from output
-    metrics = parse_output(output)
-    return metrics
+    return parse_output(output)
 
 
 def parse_output(output):
     """Parse training output to extract metrics."""
-    lines = output.split('\n')
     metrics = {
         'rounds': [],
         'train_loss': [],
@@ -59,14 +106,11 @@ def parse_output(output):
         'final_loss': None
     }
 
-    for line in lines:
+    for line in output.split('\n'):
         if 'Round' in line and 'Train Loss' in line:
             try:
-                # Parse: "Round 1/5 | Train Loss: 1.246 | Test Acc: 0.254 | Divergence: 0.3142"
                 parts = line.split('|')
-                round_part = parts[0].strip()
-                round_num = int(round_part.split()[1].split('/')[0])
-
+                round_num = int(parts[0].strip().split()[1].split('/')[0])
                 train_loss = float(parts[1].split(':')[1].strip())
                 test_acc = float(parts[2].split(':')[1].strip())
                 div = float(parts[3].split(':')[1].strip())
@@ -81,127 +125,62 @@ def parse_output(output):
         if 'Final Test Accuracy' in line:
             try:
                 metrics['final_acc'] = float(line.split(':')[1].strip())
-            except (IndexError, ValueError):
+            except:
                 pass
 
         if 'Final Test Loss' in line:
             try:
                 metrics['final_loss'] = float(line.split(':')[1].strip())
-            except (IndexError, ValueError):
+            except:
                 pass
 
     return metrics
 
 
-def run_quick_experiments(results_dir='results'):
-    """Run quick experiments for testing."""
+def run_experiments(experiments, results_dir, prefix):
+    """Run a set of experiments."""
     os.makedirs(results_dir, exist_ok=True)
-
-    experiments = [
-        ('fedavg', 'iid'),
-        ('fedavg', 'topic_skew'),
-        ('fedprox', 'topic_skew'),
-        ('scaffold', 'topic_skew'),
-    ]
-
     results = {}
-    for algo, partition in experiments:
-        name = f"{algo}_{partition}"
-        print(f"\n{'='*60}")
-        print(f"Experiment: {name}")
-        print(f"{'='*60}")
 
-        metrics = run_single_experiment(
-            algorithm=algo,
-            partition=partition,
-            num_clients=5,
-            num_rounds=5,
-            num_samples=2000,
-            batch_size=32,
-            mu=0.1  # Higher mu for FedProx to show effect
-        )
-        results[name] = metrics
+    print("=" * 60)
+    print(f"Running {len(experiments)} experiments")
+    print("=" * 60)
+
+    for i, exp in enumerate(experiments):
+        print(f"\n[{i+1}/{len(experiments)}] {exp['name']}")
+        results[exp['name']] = run_experiment(exp)
 
     # Save results
-    save_results(results, results_dir, 'quick')
-    return results
-
-
-def run_main_experiments(results_dir='results'):
-    """Run full experiment grid."""
-    os.makedirs(results_dir, exist_ok=True)
-
-    algorithms = ['fedavg', 'fedprox', 'scaffold']
-    partitions = ['iid', 'topic_skew']
-
-    results = {}
-    total = len(algorithms) * len(partitions)
-    current = 0
-
-    for algo, partition in product(algorithms, partitions):
-        current += 1
-        name = f"{algo}_{partition}"
-        print(f"\n{'='*60}")
-        print(f"Experiment {current}/{total}: {name}")
-        print(f"{'='*60}")
-
-        metrics = run_single_experiment(
-            algorithm=algo,
-            partition=partition,
-            num_clients=5,
-            num_rounds=10,
-            num_samples=4000,
-            batch_size=32
-        )
-        results[name] = metrics
-
-    save_results(results, results_dir, 'main')
-    return results
-
-
-def run_failure_experiments(results_dir='results'):
-    """Run failure mode experiments."""
-    os.makedirs(results_dir, exist_ok=True)
-
-    experiments = [
-        ('extreme_skew', {'partition': 'topic_skew', 'alpha': 0.01}),
-        ('high_lr', {'partition': 'topic_skew', 'lr': 1e-3}),
-        ('many_clients', {'partition': 'topic_skew', 'num_clients': 10}),
-    ]
-
-    results = {}
-    for name, params in experiments:
-        print(f"\n{'='*60}")
-        print(f"Failure Mode: {name}")
-        print(f"{'='*60}")
-
-        metrics = run_single_experiment(
-            algorithm='fedavg',
-            partition=params.get('partition', 'topic_skew'),
-            num_clients=params.get('num_clients', 5),
-            num_rounds=10,
-            num_samples=4000,
-            alpha=params.get('alpha', 0.1),
-            lr=params.get('lr', 2e-5)
-        )
-        results[name] = metrics
-
-    save_results(results, results_dir, 'failure')
-    return results
-
-
-def save_results(results, results_dir, prefix):
-    """Save results to JSON and generate plots."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # Save JSON
     json_path = os.path.join(results_dir, f'{prefix}_{timestamp}.json')
     with open(json_path, 'w') as f:
         json.dump(results, f, indent=2)
-    print(f"\nResults saved to: {json_path}")
+    print(f"\nResults saved: {json_path}")
 
     # Generate plots
     generate_plots(results, results_dir, prefix)
+
+    # Print summary
+    print_summary(results)
+
+    return results
+
+
+def print_summary(results):
+    """Print summary table."""
+    print("\n" + "=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print(f"{'Experiment':<25} {'Final Acc':<12} {'Final Loss':<12} {'Divergence':<12}")
+    print("-" * 70)
+
+    for name, m in sorted(results.items()):
+        acc = f"{m['final_acc']:.3f}" if m['final_acc'] else "N/A"
+        loss = f"{m['final_loss']:.3f}" if m['final_loss'] else "N/A"
+        div = f"{m['divergence'][-1]:.4f}" if m['divergence'] else "N/A"
+        print(f"{name:<25} {acc:<12} {loss:<12} {div:<12}")
+
+    print("=" * 70)
 
 
 def generate_plots(results, results_dir, prefix):
@@ -209,28 +188,31 @@ def generate_plots(results, results_dir, prefix):
     plots_dir = os.path.join(results_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)
 
+    valid_results = {k: v for k, v in results.items() if v['test_acc']}
+    if not valid_results:
+        print("No valid results to plot")
+        return
+
     # 1. Test Accuracy Over Rounds
     fig, ax = plt.subplots(figsize=(10, 6))
-    for name, metrics in results.items():
-        if metrics['test_acc']:
-            ax.plot(metrics['rounds'], metrics['test_acc'], marker='o', label=name)
-    ax.set_xlabel('Round')
-    ax.set_ylabel('Test Accuracy')
-    ax.set_title('Test Accuracy Over Training Rounds')
+    for name, m in valid_results.items():
+        ax.plot(m['rounds'], m['test_acc'], marker='o', label=name, linewidth=2)
+    ax.set_xlabel('Round', fontsize=12)
+    ax.set_ylabel('Test Accuracy', fontsize=12)
+    ax.set_title('Test Accuracy Over Training Rounds', fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(plots_dir, f'{prefix}_accuracy.png'), dpi=150)
     plt.close()
 
-    # 2. Training Loss Over Rounds
+    # 2. Training Loss
     fig, ax = plt.subplots(figsize=(10, 6))
-    for name, metrics in results.items():
-        if metrics['train_loss']:
-            ax.plot(metrics['rounds'], metrics['train_loss'], marker='o', label=name)
-    ax.set_xlabel('Round')
-    ax.set_ylabel('Training Loss')
-    ax.set_title('Training Loss Over Rounds')
+    for name, m in valid_results.items():
+        ax.plot(m['rounds'], m['train_loss'], marker='o', label=name, linewidth=2)
+    ax.set_xlabel('Round', fontsize=12)
+    ax.set_ylabel('Training Loss', fontsize=12)
+    ax.set_title('Training Loss Over Rounds', fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -239,117 +221,62 @@ def generate_plots(results, results_dir, prefix):
 
     # 3. Client Divergence
     fig, ax = plt.subplots(figsize=(10, 6))
-    for name, metrics in results.items():
-        if metrics['divergence']:
-            ax.plot(metrics['rounds'], metrics['divergence'], marker='o', label=name)
-    ax.set_xlabel('Round')
-    ax.set_ylabel('Client Divergence')
-    ax.set_title('Client Parameter Divergence Over Rounds')
+    for name, m in valid_results.items():
+        ax.plot(m['rounds'], m['divergence'], marker='o', label=name, linewidth=2)
+    ax.set_xlabel('Round', fontsize=12)
+    ax.set_ylabel('Client Divergence', fontsize=12)
+    ax.set_title('Client Parameter Divergence', fontsize=14)
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(os.path.join(plots_dir, f'{prefix}_divergence.png'), dpi=150)
     plt.close()
 
-    # 4. Final Accuracy Comparison (Bar Chart)
+    # 4. Final Accuracy Bar Chart
     fig, ax = plt.subplots(figsize=(10, 6))
-    names = [n for n in results.keys() if results[n]['final_acc'] is not None]
-    accs = [results[n]['final_acc'] for n in names]
-    colors = plt.cm.Set2(np.linspace(0, 1, len(names)))
+    names = list(valid_results.keys())
+    accs = [valid_results[n]['final_acc'] or 0 for n in names]
+    colors = ['#2ecc71' if 'fedprox' in n else '#3498db' for n in names]
     bars = ax.bar(names, accs, color=colors)
-    ax.set_ylabel('Final Test Accuracy')
-    ax.set_title('Final Accuracy Comparison')
+    ax.set_ylabel('Final Test Accuracy', fontsize=12)
+    ax.set_title('Final Accuracy Comparison', fontsize=14)
     ax.set_ylim(0, 1)
     for bar, acc in zip(bars, accs):
         ax.annotate(f'{acc:.3f}', xy=(bar.get_x() + bar.get_width()/2, acc),
-                   xytext=(0, 3), textcoords='offset points', ha='center')
+                   xytext=(0, 3), textcoords='offset points', ha='center', fontsize=10)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(os.path.join(plots_dir, f'{prefix}_final_accuracy.png'), dpi=150)
     plt.close()
 
-    # 5. Algorithm vs Partition Heatmap
-    if len(results) >= 4:
-        try:
-            algos = sorted(set(n.split('_')[0] for n in results.keys()))
-            parts = sorted(set('_'.join(n.split('_')[1:]) for n in results.keys()))
-
-            if len(algos) > 1 and len(parts) > 1:
-                data = np.zeros((len(algos), len(parts)))
-                for i, algo in enumerate(algos):
-                    for j, part in enumerate(parts):
-                        key = f"{algo}_{part}"
-                        if key in results and results[key]['final_acc'] is not None:
-                            data[i, j] = results[key]['final_acc']
-
-                fig, ax = plt.subplots(figsize=(8, 6))
-                im = ax.imshow(data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
-                ax.set_xticks(range(len(parts)))
-                ax.set_yticks(range(len(algos)))
-                ax.set_xticklabels(parts)
-                ax.set_yticklabels([a.upper() for a in algos])
-                ax.set_xlabel('Partition Type')
-                ax.set_ylabel('Algorithm')
-                ax.set_title('Final Accuracy: Algorithm vs Partition')
-                plt.colorbar(im, label='Accuracy')
-
-                for i in range(len(algos)):
-                    for j in range(len(parts)):
-                        ax.annotate(f'{data[i,j]:.3f}', xy=(j, i),
-                                   ha='center', va='center', color='black')
-
-                plt.tight_layout()
-                plt.savefig(os.path.join(plots_dir, f'{prefix}_heatmap.png'), dpi=150)
-                plt.close()
-        except Exception as e:
-            print(f"Could not generate heatmap: {e}")
-
-    print(f"Plots saved to: {plots_dir}")
+    print(f"Plots saved: {plots_dir}/")
 
 
-def analyze_results(results_dir='results'):
-    """Load and analyze existing results."""
+def analyze_results(results_dir):
+    """Analyze existing results."""
     import glob
 
-    json_files = glob.glob(os.path.join(results_dir, '*.json'))
+    json_files = sorted(glob.glob(os.path.join(results_dir, '*.json')))
     if not json_files:
-        print("No results found to analyze")
+        print("No results found")
         return
 
-    # Load most recent results
-    latest = max(json_files, key=os.path.getmtime)
+    latest = json_files[-1]
     print(f"Analyzing: {latest}")
 
     with open(latest, 'r') as f:
         results = json.load(f)
 
-    # Print summary table
-    print("\n" + "="*70)
-    print("RESULTS SUMMARY")
-    print("="*70)
-    print(f"{'Experiment':<30} {'Final Acc':<12} {'Final Loss':<12} {'Final Div':<12}")
-    print("-"*70)
-
-    for name, metrics in sorted(results.items()):
-        acc = metrics.get('final_acc', 'N/A')
-        loss = metrics.get('final_loss', 'N/A')
-        div = metrics['divergence'][-1] if metrics.get('divergence') else 'N/A'
-
-        acc_str = f"{acc:.3f}" if isinstance(acc, (int, float)) else acc
-        loss_str = f"{loss:.3f}" if isinstance(loss, (int, float)) else loss
-        div_str = f"{div:.4f}" if isinstance(div, (int, float)) else div
-
-        print(f"{name:<30} {acc_str:<12} {loss_str:<12} {div_str:<12}")
-
-    print("="*70)
-
-    # Generate plots for existing results
+    print_summary(results)
     prefix = os.path.basename(latest).replace('.json', '')
-    generate_plots(results, results_dir, prefix)
+    generate_plots(results, results_dir, f"analysis_{prefix}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run FL Experiments')
+    parser = argparse.ArgumentParser(
+        description='Run FL experiments',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
     parser.add_argument('--mode', default='quick',
                        choices=['quick', 'main', 'failure', 'analyze'],
                        help='Experiment mode')
@@ -359,16 +286,16 @@ def main():
     args = parser.parse_args()
 
     if args.mode == 'quick':
-        print("Running quick experiments (4 experiments, ~5 min)...")
-        run_quick_experiments(args.results_dir)
+        print("Running QUICK experiments (~5 min)...")
+        run_experiments(QUICK_EXPERIMENTS, args.results_dir, 'quick')
 
     elif args.mode == 'main':
-        print("Running main experiments (6 experiments, ~15 min)...")
-        run_main_experiments(args.results_dir)
+        print("Running MAIN experiments (~15 min)...")
+        run_experiments(MAIN_EXPERIMENTS, args.results_dir, 'main')
 
     elif args.mode == 'failure':
-        print("Running failure mode experiments (~10 min)...")
-        run_failure_experiments(args.results_dir)
+        print("Running FAILURE MODE experiments...")
+        run_experiments(FAILURE_EXPERIMENTS, args.results_dir, 'failure')
 
     elif args.mode == 'analyze':
         analyze_results(args.results_dir)
