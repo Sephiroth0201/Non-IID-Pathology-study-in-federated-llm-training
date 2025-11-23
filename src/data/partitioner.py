@@ -129,6 +129,18 @@ class TopicSkewPartitioner(DataPartitioner):
         for client_id in partition:
             np.random.shuffle(partition[client_id])
 
+        # Ensure minimum samples per client (redistribute from largest)
+        min_samples = max(1, num_samples // (self.num_clients * 10))  # At least 10% of fair share
+        for client_id in partition:
+            while len(partition[client_id]) < min_samples:
+                # Find client with most samples
+                largest = max(partition.keys(), key=lambda k: len(partition[k]))
+                if len(partition[largest]) > min_samples + 1:
+                    # Move one sample
+                    partition[client_id].append(partition[largest].pop())
+                else:
+                    break
+
         return partition
 
     def get_statistics(self, dataset: Any, partition: Dict[int, List[int]]) -> Dict:
