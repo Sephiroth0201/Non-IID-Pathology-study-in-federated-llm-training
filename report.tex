@@ -59,7 +59,7 @@ Federated Learning, Non-IID Data, FedAvg, FedProx, Text Classification, DistilBE
 
 Federated learning (FL) has emerged as a privacy-preserving paradigm for training machine learning models across decentralized data sources \cite{mcmahan2017communication}. In FL, clients collaboratively train a shared model by exchanging model updates rather than raw data, addressing privacy concerns in domains such as healthcare, finance, and mobile computing.
 
-A fundamental challenge in federated learning is \textit{statistical heterogeneity}---the non-identical and non-independent (non-IID) distribution of data across clients. In real-world deployments, clients often have data that differs significantly in label distributions, feature distributions, or data quality. This heterogeneity leads to several pathologies:
+A fundamental challenge in federated learning is \textit{statistical heterogeneity} the non-identical and non-independent (non-IID) distribution of data across clients. In real-world deployments, clients often have data that differs significantly in label distributions, feature distributions, or data quality. This heterogeneity leads to several pathologies:
 
 \begin{itemize}
     \item \textbf{Client drift}: Local models diverge from the global optimum as clients overfit to their local data distributions.
@@ -283,7 +283,7 @@ When the Dirichlet concentration parameter is reduced to $\alpha = 0.01$, client
 
 \subsubsection{High Learning Rate ($\text{lr} = 10^{-3}$)}
 
-Increasing the learning rate by 50$\times$ reveals a catastrophic failure mode. Fig. \ref{fig:failure_divergence} shows that client divergence explodes to values exceeding 20, compared to $\sim$0.5 for other configurations. This runaway divergence indicates that large local updates cause clients to move in incompatible directions, making aggregation ineffective. The resulting 70.4\% accuracy represents the worst performance across all experiments---a 16.6\% drop from baseline. Notably, even FedProx's proximal term cannot prevent this divergence when learning rates are too aggressive.
+Increasing the learning rate by 50$\times$ reveals a catastrophic failure mode. Fig. \ref{fig:failure_divergence} shows that client divergence explodes to values exceeding 20, compared to $\sim$0.5 for other configurations. This runaway divergence indicates that large local updates cause clients to move in incompatible directions, making aggregation ineffective. The resulting 70.4\% accuracy represents the worst performance across all experiments a 16.6\% drop from baseline. Notably, even FedProx's proximal term cannot prevent this divergence when learning rates are too aggressive.
 
 \subsubsection{Increased Client Count ($K = 10$)}
 
@@ -402,7 +402,7 @@ This appendix provides generalized algorithmic descriptions of FedAvg and FedPro
 
 \subsection{FedAvg for LLM Fine-Tuning}
 
-Algorithm \ref{alg:fedavg} presents the FedAvg algorithm adapted for language model fine-tuning. The key modification for LLMs is the use of partial parameter updates---only a subset of model parameters $\theta_{\text{train}} \subseteq \theta$ are updated during local training, while the remaining parameters $\theta_{\text{frozen}}$ remain fixed.
+Algorithm \ref{alg:fedavg} presents the FedAvg algorithm adapted for language model fine-tuning. The key modification for LLMs is the use of partial parameter updates only a subset of model parameters $\theta_{\text{train}} \subseteq \theta$ are updated during local training, while the remaining parameters $\theta_{\text{frozen}}$ remain fixed.
 
 \begin{algorithm}[H]
 \caption{FedAvg for LLM Fine-Tuning}
