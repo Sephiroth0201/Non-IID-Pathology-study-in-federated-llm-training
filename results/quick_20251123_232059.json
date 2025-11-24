@@ -1,0 +1,34 @@
+{
+  "fedavg_iid": {
+    "rounds": [],
+    "train_loss": [],
+    "test_acc": [],
+    "divergence": [],
+    "final_acc": null,
+    "final_loss": null
+  },
+  "fedavg_topic_skew": {
+    "rounds": [],
+    "train_loss": [],
+    "test_acc": [],
+    "divergence": [],
+    "final_acc": null,
+    "final_loss": null
+  },
+  "fedprox_topic_skew": {
+    "rounds": [],
+    "train_loss": [],
+    "test_acc": [],
+    "divergence": [],
+    "final_acc": null,
+    "final_loss": null
+  },
+  "scaffold_topic_skew": {
+    "rounds": [],
+    "train_loss": [],
+    "test_acc": [],
+    "divergence": [],
+    "final_acc": null,
+    "final_loss": null
+  }
+}

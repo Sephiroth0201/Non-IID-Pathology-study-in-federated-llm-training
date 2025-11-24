@@ -1,0 +1,585 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb}
+\usepackage{float}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{cite}
+
+\title{Failure Modes of Federated Fine-Tuning Under Non-IID Data: A Comparative Study of FedAvg and FedProx}
+
+\author{
+\begin{minipage}{0.32\textwidth}
+\centering
+\textbf{Aviral Vishesh Goel}\\
+Department of Electrical Engineering\\
+IIT Bombay\\
+aviralvisheshgoel@iitb.ac.in
+\end{minipage}
+\hfill
+\begin{minipage}{0.32\textwidth}
+\centering
+\textbf{Adit Srivastava}\\
+Department of Electrical Engineering\\
+IIT Bombay\\
+22b1269@iitb.ac.in
+\end{minipage}
+\hfill
+\begin{minipage}{0.32\textwidth}
+\centering
+\textbf{Aagam Shah}\\
+Department of Electrical Engineering\\
+IIT Bombay\\
+22b1201@iitb.ac.in
+\end{minipage}
+}
+
+
+\begin{document}
+\maketitle
+
+% ============================================================================
+% ABSTRACT
+% ============================================================================
+\begin{abstract}
+Federated learning enables collaborative model training across distributed clients without sharing raw data. However, statistical heterogeneity (non-IID data) across clients poses significant challenges to convergence and model quality. In this work, we conduct a systematic empirical study comparing FedAvg and FedProx algorithms on text classification using DistilBERT, under controlled non-IID conditions created via Dirichlet-based label skew. Our experiments on the AG News dataset demonstrate that: (1) non-IID data distributions cause substantial client parameter divergence, (2) FedProx's proximal regularization effectively reduces this divergence, and (3) FedProx achieves higher final accuracy (87.0\%) compared to FedAvg (83.8\%) under heterogeneous data while maintaining comparable performance on IID data. We provide detailed analysis of convergence behavior, client drift metrics, and failure modes under extreme heterogeneity.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Federated Learning, Non-IID Data, FedAvg, FedProx, Text Classification, DistilBERT
+\end{IEEEkeywords}
+
+% ============================================================================
+% INTRODUCTION
+% ============================================================================
+\section{Introduction}
+
+Federated learning (FL) has emerged as a privacy-preserving paradigm for training machine learning models across decentralized data sources \cite{mcmahan2017communication}. In FL, clients collaboratively train a shared model by exchanging model updates rather than raw data, addressing privacy concerns in domains such as healthcare, finance, and mobile computing.
+
+A fundamental challenge in federated learning is \textit{statistical heterogeneity}---the non-identical and non-independent (non-IID) distribution of data across clients. In real-world deployments, clients often have data that differs significantly in label distributions, feature distributions, or data quality. This heterogeneity leads to several pathologies:
+
+\begin{itemize}
+    \item \textbf{Client drift}: Local models diverge from the global optimum as clients overfit to their local data distributions.
+    \item \textbf{Slow convergence}: Aggregating divergent updates leads to oscillation and delayed convergence.
+    \item \textbf{Degraded generalization}: The global model may fail to generalize across the heterogeneous client populations.
+\end{itemize}
+
+The seminal FedAvg algorithm \cite{mcmahan2017communication} performs weighted averaging of client updates but provides no mechanism to handle client drift. FedProx \cite{li2020federated} addresses this by adding a proximal term that penalizes deviation from the global model during local training.
+
+\subsection{Contributions}
+
+In this paper, we present a controlled empirical study of federated learning pathologies under non-IID data distributions. Our contributions include:
+
+\begin{enumerate}
+    \item A systematic comparison of FedAvg and FedProx on text classification using transformer-based models (DistilBERT).
+    \item Quantitative analysis of client parameter divergence as a metric for measuring the impact of data heterogeneity.
+    \item Experimental evidence demonstrating FedProx's effectiveness in reducing client drift and improving convergence under non-IID conditions.
+    \item Analysis of failure modes under extreme heterogeneity conditions.
+\end{enumerate}
+
+% ============================================================================
+% RELATED WORK
+% ============================================================================
+\section{Related Work}
+
+\subsection{Federated Learning Algorithms}
+
+\textbf{FedAvg} \cite{mcmahan2017communication} established the foundational framework for federated learning, where clients perform multiple local SGD steps before aggregating updates via weighted averaging. While effective for IID data, FedAvg struggles with heterogeneous distributions.
+
+\textbf{FedProx} \cite{li2020federated} introduces a proximal term $\frac{\mu}{2}\|w - w^t\|^2$ to the local objective, where $w^t$ is the global model at round $t$. This regularization limits how far local models can drift from the global model, providing theoretical convergence guarantees under heterogeneity.
+
+
+\subsection{Non-IID Data in Federated Learning}
+
+The impact of non-IID data has been extensively studied. Zhao et al. \cite{zhao2018federated} showed that accuracy can drop by up to 55\% on highly skewed data. Common non-IID scenarios include label skew (different label distributions), feature skew (same labels but different features), and quantity skew (varying data amounts per client).
+
+\subsection{Federated Learning for NLP}
+
+Recent work has explored federated learning for language models. FedNLP \cite{lin2022fednlp} provides benchmarks for federated NLP tasks. Studies have shown that transformer models are particularly sensitive to data heterogeneity due to their large parameter spaces and complex optimization landscapes.
+
+% ============================================================================
+% METHODOLOGY
+% ============================================================================
+\section{Methodology}
+
+\subsection{Problem Formulation}
+
+Consider $K$ clients, each with local dataset $\mathcal{D}_k$ of size $n_k$. The federated learning objective is:
+
+\begin{equation}
+    \min_w F(w) = \sum_{k=1}^{K} \frac{n_k}{n} F_k(w)
+\end{equation}
+
+where $n = \sum_k n_k$ is the total number of samples and $F_k(w) = \mathbb{E}_{(x,y) \sim \mathcal{D}_k}[\ell(w; x, y)]$ is the local objective for client $k$.
+
+\subsection{FedAvg Algorithm}
+
+FedAvg proceeds in communication rounds. At each round $t$: (1) Server broadcasts global model $w^t$ to selected clients, (2) Each client $k$ initializes $w_k^{t,0} = w^t$ and performs $E$ local epochs of SGD, (3) Server aggregates: $w^{t+1} = \sum_k \frac{n_k}{n} w_k^{t,E}$.
+
+\subsection{FedProx Algorithm}
+
+FedProx modifies the local objective by adding a proximal term:
+
+\begin{equation}
+    h_k(w; w^t) = F_k(w) + \frac{\mu}{2}\|w - w^t\|^2
+\end{equation}
+
+The hyperparameter $\mu \geq 0$ controls the strength of regularization. When $\mu = 0$, FedProx reduces to FedAvg. The proximal term penalizes local updates that deviate significantly from the global model, effectively limiting client drift.
+
+\subsection{Non-IID Data Generation}
+
+We use Dirichlet-based label allocation to create controlled non-IID partitions. For a dataset with $C$ classes, we sample label proportions for each client from:
+
+\begin{equation}
+    p_k \sim \text{Dir}(\alpha \cdot \mathbf{1}_C)
+\end{equation}
+
+where $\alpha > 0$ is the concentration parameter. Smaller $\alpha$ values produce more heterogeneous distributions: $\alpha \to \infty$ yields IID distribution, $\alpha = 0.1$ produces high heterogeneity, and $\alpha \to 0$ gives each client only one class.
+
+\subsection{Client Divergence Metric}
+
+To quantify client drift, we compute the parameter divergence after each round:
+
+\begin{equation}
+    \text{Divergence} = \frac{1}{K}\sum_{k=1}^{K} \|w_k - \bar{w}\|_2
+\end{equation}
+
+where $\bar{w} = \frac{1}{K}\sum_k w_k$ is the mean of client parameters. Higher divergence indicates greater disagreement among clients.
+
+% ============================================================================
+% EXPERIMENTAL SETUP
+% ============================================================================
+\section{Experimental Setup}
+
+\subsection{Dataset and Model}
+
+We use the AG News dataset \cite{zhang2015character}, a text classification benchmark with 4 classes: World, Sports, Business, and Science/Technology. We sample 4,000 training examples and 500 test examples.
+
+We employ DistilBERT \cite{sanh2019distilbert}, a distilled version of BERT with 66M parameters. We freeze the first 4 transformer layers and fine-tune only the last 2 layers plus the classification head, resulting in approximately 15M trainable parameters (22\% of total).
+
+\subsection{Federated Configuration}
+
+Table \ref{tab:config} summarizes our experimental configuration.
+
+\begin{table}[H]
+\centering
+\caption{Experimental Configuration}
+\label{tab:config}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Number of clients $K$ & 5 \\
+Communication rounds & 50 \\
+Local epochs $E$ & 2 \\
+Batch size & 32 \\
+Learning rate & $2 \times 10^{-5}$ \\
+Dirichlet $\alpha$ (non-IID) & 0.1 \\
+FedProx $\mu$ & 0.1 \\
+Optimizer & AdamW \\
+Max sequence length & 64 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Experiments}
+
+We conduct four main experiments: (1) FedAvg + IID as baseline, (2) FedAvg + Non-IID under Dirichlet-skewed data ($\alpha=0.1$), (3) FedProx + IID, and (4) FedProx + Non-IID. Additionally, we conduct failure mode experiments with extreme heterogeneity ($\alpha = 0.01$), high learning rate ($\text{lr} = 10^{-3}$), and increased clients ($K = 10$).
+
+% ============================================================================
+% RESULTS
+% ============================================================================
+\section{Results}
+
+\subsection{Main Results}
+
+Table \ref{tab:results} summarizes the final test accuracy and divergence metrics across all experiments.
+
+\begin{table}[H]
+\centering
+\caption{Main Experimental Results (50 rounds)}
+\label{tab:results}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Experiment} & \textbf{Accuracy} & \textbf{Divergence} \\
+\midrule
+FedAvg + IID & 86.4\% & 0.35 \\
+FedAvg + Non-IID & 83.8\% & 0.46 \\
+FedProx + IID & 86.4\% & 0.24 \\
+FedProx + Non-IID & \textbf{87.0\%} & 0.33 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Convergence Analysis}
+
+Fig. \ref{fig:accuracy} shows test accuracy over training rounds. Under IID conditions, both algorithms converge rapidly, reaching $\sim$87\% accuracy within 10 rounds. Under non-IID conditions, convergence is significantly slower. FedAvg exhibits high variance with accuracy fluctuating between 75-85\%, while FedProx shows more stable convergence with less oscillation. FedProx consistently outperforms FedAvg by 3-10\% during intermediate rounds (5-30).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/main_accuracy.png}
+    \caption{Test accuracy over training rounds. FedProx shows more stable convergence under non-IID conditions compared to FedAvg.}
+    \label{fig:accuracy}
+\end{figure}
+
+\subsection{Client Divergence Analysis}
+
+Fig. \ref{fig:divergence} illustrates client parameter divergence over rounds. Non-IID settings start with significantly higher divergence ($\sim$1.0-1.1) compared to IID ($\sim$0.3-0.4). Under non-IID data, FedAvg divergence remains elevated throughout training, stabilizing around 0.45-0.50. The proximal term in FedProx successfully reduces divergence, with FedProx non-IID converging to $\sim$0.33, approaching IID levels.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/main_divergence.png}
+    \caption{Client parameter divergence over rounds. FedProx's proximal term effectively reduces client drift under non-IID conditions.}
+    \label{fig:divergence}
+\end{figure}
+
+\subsection{Training Dynamics}
+
+Fig. \ref{fig:loss} shows training loss curves. Interestingly, non-IID settings exhibit \textit{lower} training loss. This occurs because clients overfit to their local (biased) data distributions, achieving low loss on their skewed subsets but poor generalization to the global test set.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/main_loss.png}
+    \caption{Training loss over rounds. Lower training loss in non-IID settings reflects local overfitting rather than better learning.}
+    \label{fig:loss}
+\end{figure}
+
+\subsection{Final Accuracy Comparison}
+
+Fig. \ref{fig:final} presents a bar chart comparison of final accuracies. Non-IID data causes a 2.6\% accuracy drop for FedAvg (86.4\% $\to$ 83.8\%). FedProx not only recovers this gap but achieves the \textit{highest} accuracy (87.0\%) on non-IID data. On IID data, both algorithms perform identically (86.4\%), confirming that FedProx's proximal term does not hurt performance when heterogeneity is absent.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/main_final_accuracy.png}
+    \caption{Final test accuracy comparison. FedProx achieves the best performance under non-IID conditions.}
+    \label{fig:final}
+\end{figure}
+
+\subsection{Failure Mode Analysis}
+
+To understand when federated learning breaks down, we conducted additional experiments under extreme conditions using FedProx with non-IID data as the base configuration. Table \ref{tab:failure} summarizes these failure mode experiments.
+
+\begin{table}[H]
+\centering
+\caption{Failure Mode Experiments (FedProx + Non-IID)}
+\label{tab:failure}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Condition} & \textbf{Accuracy} & \textbf{Divergence} \\
+\midrule
+Baseline ($\alpha=0.1$, $K=5$) & 87.0\% & 0.33 \\
+Extreme skew ($\alpha=0.01$) & 80.6\% & 0.50 \\
+High LR ($\text{lr}=10^{-3}$) & 70.4\% & 21.5 \\
+Many clients ($K=10$) & \textbf{88.2\%} & 0.45 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Extreme Label Skew ($\alpha = 0.01$)}
+When the Dirichlet concentration parameter is reduced to $\alpha = 0.01$, clients receive nearly homogeneous data with only 1-2 classes each. As shown in Fig. \ref{fig:failure_accuracy}, this extreme heterogeneity causes severe initial degradation, the accuracy starts at approximately 55\% (near random for 4 classes) and converges slowly over 50 rounds. The final accuracy of 80.6\% represents a 6.4\% drop from the baseline, demonstrating that extreme label skew significantly impairs learning even with proximal regularization.
+
+\subsubsection{High Learning Rate ($\text{lr} = 10^{-3}$)}
+
+Increasing the learning rate by 50$\times$ reveals a catastrophic failure mode. Fig. \ref{fig:failure_divergence} shows that client divergence explodes to values exceeding 20, compared to $\sim$0.5 for other configurations. This runaway divergence indicates that large local updates cause clients to move in incompatible directions, making aggregation ineffective. The resulting 70.4\% accuracy represents the worst performance across all experiments---a 16.6\% drop from baseline. Notably, even FedProx's proximal term cannot prevent this divergence when learning rates are too aggressive.
+
+\subsubsection{Increased Client Count ($K = 10$)}
+
+Surprisingly, doubling the number of clients to $K=10$ \textit{improved} performance, achieving the highest accuracy (88.2\%) across all experiments. With more clients, each client receives a smaller data subset, but the diversity of local models during aggregation appears beneficial. The divergence remains manageable at 0.45, suggesting that the proximal term scales effectively with additional clients.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/failure_accuracy.png}
+    \caption{Accuracy under failure conditions. Extreme skew shows slow convergence from low initial accuracy; high learning rate causes unstable training with persistent oscillation.}
+    \label{fig:failure_accuracy}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/failure_divergence.png}
+    \caption{Client divergence under failure conditions. High learning rate causes catastrophic divergence ($>$20$\times$ baseline), while extreme skew and many clients maintain manageable divergence levels.}
+    \label{fig:failure_divergence}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\columnwidth]{results/plots/failure_final_accuracy.png}
+    \caption{Final accuracy comparison for failure mode experiments. High learning rate produces the worst results, while many clients surprisingly achieves the best performance.}
+    \label{fig:failure_final}
+\end{figure}
+
+% ============================================================================
+% DISCUSSION
+% ============================================================================
+\section{Discussion}
+
+\subsection{Why Does FedProx Help?}
+
+The proximal term $\frac{\mu}{2}\|w - w^t\|^2$ acts as a regularizer that prevents local models from straying too far from the global model during local training. This has several effects: (1) \textbf{Reduced client drift}: By penalizing deviation, local updates remain closer to the global optimum, leading to more coherent aggregation. (2) \textbf{Implicit ensemble effect}: The proximal term encourages clients to find solutions that work well both locally and globally. (3) \textbf{Stabilized optimization}: Gradient updates are dampened, reducing oscillation in the aggregated model.
+
+\subsection{The Divergence-Accuracy Relationship}
+
+Our results reveal a clear correlation between client divergence and test accuracy. High divergence indicates that clients are learning conflicting representations, making aggregation less effective. FedProx's ability to reduce divergence directly translates to improved accuracy.
+
+\subsection{Insights from Failure Modes}
+
+Our failure mode experiments reveal important practical considerations:
+
+\begin{itemize}
+    \item \textbf{Learning rate sensitivity}: The catastrophic divergence observed with high learning rates ($>$50$\times$ normal) underscores the importance of careful hyperparameter tuning in federated settings. Unlike centralized training where aggressive learning rates may simply slow convergence, in FL they can cause irreversible client drift.
+    \item \textbf{Extreme heterogeneity limits}: Even with FedProx regularization, extreme label skew ($\alpha=0.01$) causes significant accuracy degradation. This suggests a practical lower bound on data diversity per client for effective federated learning.
+    \item \textbf{Client scaling benefits}: The improved performance with more clients (88.2\% with $K=10$ vs. 87.0\% with $K=5$) suggests that increased model diversity during aggregation can be beneficial, provided heterogeneity per client is manageable.
+\end{itemize}
+
+\subsection{Limitations}
+
+Our study has several limitations: (1) We used 5 clients and 4,000 training samples, while real-world FL deployments may involve thousands of clients. (2) We focused on label skew; other forms of heterogeneity may produce different results. (3) DistilBERT is relatively small; larger language models may exhibit different behavior. (4) We used full client participation; partial participation introduces additional variance.
+
+% ============================================================================
+% CONCLUSION
+% ============================================================================
+\section{Conclusion}
+
+We presented a systematic empirical study of federated learning under non-IID data distributions, comparing FedAvg and FedProx on text classification with DistilBERT. Our key findings are:
+
+\begin{enumerate}
+    \item \textbf{Non-IID data significantly impacts federated learning}: Client divergence increases substantially, convergence slows, and accuracy degrades.
+    \item \textbf{FedProx effectively mitigates heterogeneity}: The proximal regularization reduces client drift by approximately 30\% compared to FedAvg under non-IID conditions.
+    \item \textbf{FedProx improves accuracy on heterogeneous data}: FedProx achieved 87.0\% accuracy compared to FedAvg's 83.8\% a 3.2\% improvement.
+    \item \textbf{No penalty on IID data}: FedProx matches FedAvg performance when data is homogeneous, making it a safe default choice.
+\end{enumerate}
+
+These results suggest that practitioners deploying federated learning in heterogeneous environments should consider FedProx or similar regularization-based approaches. Future work could explore adaptive $\mu$ selection, combination with client clustering, and scaling to larger models.
+
+% ============================================================================
+% REFERENCES
+% ============================================================================
+\begin{thebibliography}{10}
+
+\bibitem{mcmahan2017communication}
+B. McMahan, E. Moore, D. Ramage, S. Hampson, and B. A. y Arcas,
+``Communication-efficient learning of deep networks from decentralized data,''
+in \emph{Proc. AISTATS}, pp. 1273--1282, 2017.
+
+\bibitem{li2020federated}
+T. Li, A. K. Sahu, M. Zaheer, M. Sanjabi, A. Talwalkar, and V. Smith,
+``Federated optimization in heterogeneous networks,''
+\emph{Proc. MLSys}, vol. 2, pp. 429--450, 2020.
+
+\bibitem{zhao2018federated}
+Y. Zhao, M. Li, L. Lai, N. Suda, D. Civin, and V. Chandra,
+``Federated learning with non-IID data,''
+\emph{arXiv:1806.00582}, 2018.
+
+\bibitem{zhang2015character}
+X. Zhang, J. Zhao, and Y. LeCun,
+``Character-level convolutional networks for text classification,''
+in \emph{Proc. NeurIPS}, pp. 649--657, 2015.
+
+\bibitem{sanh2019distilbert}
+V. Sanh, L. Debut, J. Chaumond, and T. Wolf,
+``DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter,''
+\emph{arXiv:1910.01108}, 2019.
+
+\bibitem{lin2022fednlp}
+B. Y. Lin, C. He, Z. Zeng, H. Wang, Y. Huang, M. Soltanolkotabi, X. Ren, and S. Avestimehr,
+``FedNLP: Benchmarking federated learning methods for natural language processing tasks,''
+in \emph{Findings of ACL}, 2022.
+
+\end{thebibliography}
+
+% ============================================================================
+% APPENDIX
+% ============================================================================
+\appendix
+
+\section{Federated Learning Algorithms}
+\label{appendix:algorithms}
+
+This appendix provides generalized algorithmic descriptions of FedAvg and FedProx for fine-tuning large language models in federated settings.
+
+\subsection{FedAvg for LLM Fine-Tuning}
+
+Algorithm \ref{alg:fedavg} presents the FedAvg algorithm adapted for language model fine-tuning. The key modification for LLMs is the use of partial parameter updates---only a subset of model parameters $\theta_{\text{train}} \subseteq \theta$ are updated during local training, while the remaining parameters $\theta_{\text{frozen}}$ remain fixed.
+
+\begin{algorithm}[H]
+\caption{FedAvg for LLM Fine-Tuning}
+\label{alg:fedavg}
+\begin{algorithmic}[1]
+\REQUIRE Number of clients $K$, rounds $T$, local epochs $E$, learning rate $\eta$, trainable parameters $\theta_{\text{train}}$
+\STATE \textbf{Server initializes} global model $w^0$
+\FOR{each round $t = 0, 1, \ldots, T-1$}
+    \STATE $S_t \leftarrow$ sample subset of clients
+    \FOR{each client $k \in S_t$ \textbf{in parallel}}
+        \STATE $w_k^{t,0} \leftarrow w^t$ \COMMENT{Download global model}
+        \FOR{each local epoch $e = 1, \ldots, E$}
+            \FOR{each batch $(x, y) \in \mathcal{D}_k$}
+                \STATE $\mathcal{L} \leftarrow \text{CrossEntropy}(f_{w_k}(x), y)$
+                \STATE $w_k^{t,e} \leftarrow w_k^{t,e-1} - \eta \nabla_{w_{\text{train}}} \mathcal{L}$
+            \ENDFOR
+        \ENDFOR
+        \STATE Send $\Delta w_k^t = w_k^{t,E} - w^t$ to server
+    \ENDFOR
+    \STATE $w^{t+1} \leftarrow w^t + \sum_{k \in S_t} \frac{n_k}{\sum_{j \in S_t} n_j} \Delta w_k^t$
+\ENDFOR
+\RETURN $w^T$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{FedProx for LLM Fine-Tuning}
+
+Algorithm \ref{alg:fedprox} extends FedAvg with a proximal term that regularizes local updates. The proximal term $\frac{\mu}{2}\|w - w^t\|^2$ is added to the loss function, penalizing deviation from the global model.
+
+\begin{algorithm}[H]
+\caption{FedProx for LLM Fine-Tuning}
+\label{alg:fedprox}
+\begin{algorithmic}[1]
+\REQUIRE Number of clients $K$, rounds $T$, local epochs $E$, learning rate $\eta$, proximal parameter $\mu$
+\STATE \textbf{Server initializes} global model $w^0$
+\FOR{each round $t = 0, 1, \ldots, T-1$}
+    \STATE $S_t \leftarrow$ sample subset of clients
+    \FOR{each client $k \in S_t$ \textbf{in parallel}}
+        \STATE $w_k^{t,0} \leftarrow w^t$ \COMMENT{Download global model}
+        \FOR{each local epoch $e = 1, \ldots, E$}
+            \FOR{each batch $(x, y) \in \mathcal{D}_k$}
+                \STATE $\mathcal{L}_{\text{task}} \leftarrow \text{CrossEntropy}(f_{w_k}(x), y)$
+                \STATE $\mathcal{L}_{\text{prox}} \leftarrow \frac{\mu}{2}\|w_k^{t,e-1} - w^t\|^2$
+                \STATE $\mathcal{L} \leftarrow \mathcal{L}_{\text{task}} + \mathcal{L}_{\text{prox}}$
+                \STATE $w_k^{t,e} \leftarrow w_k^{t,e-1} - \eta \nabla_{w_{\text{train}}} \mathcal{L}$
+            \ENDFOR
+        \ENDFOR
+        \STATE Send $\Delta w_k^t = w_k^{t,E} - w^t$ to server
+    \ENDFOR
+    \STATE $w^{t+1} \leftarrow w^t + \sum_{k \in S_t} \frac{n_k}{\sum_{j \in S_t} n_j} \Delta w_k^t$
+\ENDFOR
+\RETURN $w^T$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Gradient of the Proximal Term}
+
+The proximal term adds a gradient correction during backpropagation:
+\begin{equation}
+    \nabla_w \mathcal{L}_{\text{prox}} = \mu (w - w^t)
+\end{equation}
+
+This effectively pulls the local model back toward the global model at each optimization step. The complete gradient update becomes:
+\begin{equation}
+    w \leftarrow w - \eta \left( \nabla_w \mathcal{L}_{\text{task}} + \mu (w - w^t) \right)
+\end{equation}
+
+\section{Dirichlet-Based Data Partitioning}
+\label{appendix:dirichlet}
+
+Algorithm \ref{alg:dirichlet} describes the Dirichlet-based label allocation used to create non-IID data partitions.
+
+\begin{algorithm}[H]
+\caption{Dirichlet Non-IID Partitioning}
+\label{alg:dirichlet}
+\begin{algorithmic}[1]
+\REQUIRE Dataset $\mathcal{D}$ with $C$ classes, $K$ clients, concentration $\alpha$
+\STATE Group samples by class: $\mathcal{D}_c$ for $c = 1, \ldots, C$
+\FOR{each client $k = 1, \ldots, K$}
+    \STATE Sample $p_k \sim \text{Dir}(\alpha \cdot \mathbf{1}_C)$
+    \STATE $\mathcal{D}_k \leftarrow \emptyset$
+\ENDFOR
+\FOR{each class $c = 1, \ldots, C$}
+    \STATE Compute allocation: $a_{k,c} = \lfloor |\mathcal{D}_c| \cdot p_{k,c} / \sum_j p_{j,c} \rfloor$
+    \STATE Shuffle $\mathcal{D}_c$ randomly
+    \STATE $\text{idx} \leftarrow 0$
+    \FOR{each client $k = 1, \ldots, K$}
+        \STATE $\mathcal{D}_k \leftarrow \mathcal{D}_k \cup \mathcal{D}_c[\text{idx}:\text{idx}+a_{k,c}]$
+        \STATE $\text{idx} \leftarrow \text{idx} + a_{k,c}$
+    \ENDFOR
+\ENDFOR
+\RETURN $\{\mathcal{D}_1, \ldots, \mathcal{D}_K\}$
+\end{algorithmic}
+\end{algorithm}
+
+The concentration parameter $\alpha$ controls heterogeneity:
+\begin{itemize}
+    \item $\alpha \to \infty$: Uniform distribution (IID)
+    \item $\alpha = 1.0$: Moderate heterogeneity
+    \item $\alpha = 0.1$: High heterogeneity
+    \item $\alpha \to 0$: Each client gets single class
+\end{itemize}
+
+\section{Client Divergence Computation}
+\label{appendix:divergence}
+
+We compute client parameter divergence to quantify the degree of client drift. After each round, we measure how far individual client models have deviated from their mean.
+
+\begin{algorithm}[H]
+\caption{Client Divergence Computation}
+\label{alg:divergence}
+\begin{algorithmic}[1]
+\REQUIRE Client models $\{w_1, \ldots, w_K\}$ after local training
+\STATE $\bar{w} \leftarrow \frac{1}{K} \sum_{k=1}^{K} w_k$ \COMMENT{Compute mean}
+\STATE $\text{divergence} \leftarrow 0$
+\FOR{each client $k = 1, \ldots, K$}
+    \STATE $\text{divergence} \leftarrow \text{divergence} + \|w_k - \bar{w}\|_2$
+\ENDFOR
+\STATE $\text{divergence} \leftarrow \text{divergence} / K$
+\RETURN divergence
+\end{algorithmic}
+\end{algorithm}
+
+For transformer models with millions of parameters, we compute the $L_2$ norm only over trainable parameters to reduce computational overhead.
+
+\section{Hyperparameter Sensitivity}
+\label{appendix:hyperparams}
+
+Table \ref{tab:hyperparams} provides guidance on hyperparameter selection for federated LLM fine-tuning based on our experimental findings.
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameter Guidelines for Federated LLM Fine-Tuning}
+\label{tab:hyperparams}
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Range} & \textbf{Notes} \\
+\midrule
+Learning rate $\eta$ & $10^{-5}$--$5 \times 10^{-5}$ & Critical; too high causes \\
+ & & catastrophic divergence \\
+Proximal $\mu$ & 0.01--0.1 & Higher for more \\
+ & & heterogeneous data \\
+Local epochs $E$ & 1--3 & More epochs increase drift \\
+Batch size & 16--64 & Memory constrained \\
+Dirichlet $\alpha$ & 0.1--1.0 & $<$0.05 causes severe issues \\
+Sequence length & 64--128 & Balance quality vs. memory \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Experimental Data Statistics}
+\label{appendix:data}
+
+Table \ref{tab:data_dist} shows the class distribution across clients under our non-IID configuration ($\alpha = 0.1$).
+
+\begin{table}[H]
+\centering
+\caption{Sample Class Distribution Across Clients ($\alpha = 0.1$)}
+\label{tab:data_dist}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Client} & \textbf{World} & \textbf{Sports} & \textbf{Business} & \textbf{Sci/Tech} \\
+\midrule
+Client 1 & 412 & 89 & 156 & 143 \\
+Client 2 & 67 & 523 & 112 & 98 \\
+Client 3 & 203 & 134 & 387 & 76 \\
+Client 4 & 156 & 87 & 201 & 356 \\
+Client 5 & 162 & 167 & 144 & 327 \\
+\midrule
+\textbf{Total} & 1000 & 1000 & 1000 & 1000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The heterogeneous distribution is evident: Client 1 is dominated by World news, Client 2 by Sports, etc. This label imbalance forces clients to learn biased local representations.
+\\
+\\
+All experiments were conducted in a simulated federated setting on a single machine. In a real distributed deployment, communication overhead would be the primary bottleneck rather than computation.
+
+\end{document}
