@@ -183,6 +183,7 @@ pdflatex report.tex
 
 - **FedAvg**: McMahan et al., "Communication-Efficient Learning of Deep Networks from Decentralized Data", AISTATS 2017
 - **FedProx**: Li et al., "Federated Optimization in Heterogeneous Networks", MLSys 2020
+- Claude-Code: Helped in coding execution.
 
 ## Authors
 
@@ -190,6 +191,4 @@ pdflatex report.tex
 - Adit Srivastava (IIT Bombay)
 - Aagam Shah (IIT Bombay)
 
-## License
 
-MIT License
