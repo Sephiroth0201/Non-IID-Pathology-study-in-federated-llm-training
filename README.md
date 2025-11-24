@@ -1,39 +1,45 @@
-# Failure Modes of Federated Fine-Tuning of Language Models Under Extreme Non-IID Data Distributions
+# Failure Modes of Federated Fine-Tuning Under Non-IID Data
 
-A comprehensive study of how federated learning algorithms fail when training large language models under extreme data heterogeneity.
+A systematic empirical study comparing FedAvg and FedProx algorithms on text classification using DistilBERT, under controlled non-IID conditions.
 
 ## Research Questions
 
-1. When does federated training of LLMs **break down** under data heterogeneity?
-2. What kinds of non-IID splits hurt convergence, generalization, and representation quality?
-3. How do FedAvg, FedProx, and SCAFFOLD **fail differently**?
-4. Can data-aware client clustering fix these failures?
+1. When does federated training of language models **break down** under data heterogeneity?
+2. How do **FedAvg** and **FedProx** behave differently under non-IID distributions?
+3. What role does **client parameter divergence** play in model quality?
+4. What are the **failure modes** under extreme conditions (high LR, extreme skew)?
+
+## Key Findings
+
+| Experiment | Final Accuracy | Divergence |
+|------------|----------------|------------|
+| FedAvg + IID | 86.4% | 0.35 |
+| FedAvg + Non-IID | 83.8% | 0.46 |
+| FedProx + IID | 86.4% | 0.24 |
+| **FedProx + Non-IID** | **87.0%** | 0.33 |
+
+- FedProx outperforms FedAvg by **3.2%** under non-IID conditions
+- Proximal regularization reduces client divergence by ~30%
+- High learning rates cause **catastrophic divergence** (>20x baseline)
 
 ## Project Structure
 
 ```
 ├── src/
 │   ├── data/
-│   │   ├── partitioner.py      # Non-IID partitioning strategies
-│   │   └── datasets.py         # Dataset loading and preprocessing
+│   │   ├── partitioner.py      # Non-IID partitioning (Dirichlet-based)
+│   │   └── datasets.py         # AG News dataset loading
 │   ├── models/
-│   │   └── lora_model.py       # LoRA fine-tuning for LLMs
+│   │   └── lora_model.py       # DistilBERT model utilities
 │   ├── federated/
-│   │   ├── client.py           # FL client implementations
-│   │   ├── server.py           # FL server implementations
-│   │   ├── fedavg.py           # FedAvg algorithm
-│   │   ├── fedprox.py          # FedProx algorithm
-│   │   └── scaffold.py         # SCAFFOLD algorithm
-│   ├── metrics/
-│   │   └── metrics.py          # Metrics collection and failure detection
-│   └── utils/
-│       ├── config.py           # Configuration management
-│       ├── logging_utils.py    # Logging utilities
-│       └── visualization.py    # Plotting and analysis
-├── configs/
-│   └── default.yaml            # Default experiment configuration
+│   │   └── client.py           # FederatedClient & FedProxClient
+│   └── metrics/
+│       └── metrics.py          # Metrics collection
 ├── train.py                    # Main training script
-├── run_experiments.py          # Systematic experiment runner
+├── run_experiments.py          # Experiment runner
+├── report.tex                  # IEEE-format research report
+├── results/
+│   └── plots/                  # Generated experiment plots
 └── requirements.txt
 ```
 
@@ -48,118 +54,142 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Requirements
+- Python 3.8+
+- PyTorch
+- Transformers (HuggingFace)
+- datasets
+- numpy, matplotlib
+
 ## Quick Start
 
 ### Single Experiment
+
 ```bash
-# Run FedAvg with topic skew partition
-python train.py --algorithm fedavg --partition topic_skew --num-rounds 50
+# FedAvg with IID data (baseline)
+python train.py -a fedavg -p iid
 
-# Run FedProx with style skew
-python train.py --algorithm fedprox --partition style_skew --mu 0.01
+# FedAvg with non-IID data
+python train.py -a fedavg -p topic_skew
 
-# Run SCAFFOLD with token skew
-python train.py --algorithm scaffold --partition token_skew
-```
+# FedProx with non-IID data
+python train.py -a fedprox -p topic_skew
 
-### Using Configuration File
-```bash
-python train.py --config configs/default.yaml
+# FedProx with extreme non-IID (alpha=0.01)
+python train.py -a fedprox -p topic_skew --alpha 0.01
+
+# Custom configuration
+python train.py -a fedprox -p topic_skew -c 10 -r 50 --mu 0.1 --lr 2e-5
 ```
 
 ### Systematic Experiments
+
 ```bash
-# Quick test (fewer rounds)
+# Quick test (3 experiments, ~5 min)
 python run_experiments.py --mode quick
 
-# Full experiment grid
+# Full comparison (4 experiments, ~15 min)
 python run_experiments.py --mode main
 
 # Failure mode analysis
 python run_experiments.py --mode failure
 
-# Generate analysis from results
+# Analyze existing results
 python run_experiments.py --mode analyze
 ```
 
-## Non-IID Partition Types
+## Command-Line Arguments
 
-### 1. Topic Skew (`topic_skew`)
-Each client receives data from specific topics/domains using Dirichlet distribution.
-- Parameter: `alpha` (lower = more skewed)
-- Tests: vocabulary and concept mismatch
-
-### 2. Style Skew (`style_skew`)
-Clients differ in writing style characteristics.
-- Criteria: `length`, `formality`, `complexity`
-- Tests: syntactic and stylistic drift
-
-### 3. Token Distribution Skew (`token_skew`)
-Artificially manipulated token frequencies.
-- Types: `frequency`, `truncation`, `vocabulary`
-- Tests: gradient bias across clients
+| Argument | Short | Default | Description |
+|----------|-------|---------|-------------|
+| `--algorithm` | `-a` | `fedavg` | Algorithm: `fedavg` or `fedprox` |
+| `--partition` | `-p` | `iid` | Data partition: `iid` or `topic_skew` |
+| `--clients` | `-c` | `5` | Number of federated clients |
+| `--rounds` | `-r` | `5` | Communication rounds |
+| `--local-epochs` | `-e` | `2` | Local training epochs per round |
+| `--samples` | `-n` | `2000` | Training samples from AG News |
+| `--batch` | `-b` | `32` | Batch size |
+| `--alpha` | | `0.1` | Dirichlet concentration (lower = more non-IID) |
+| `--mu` | | `0.1` | FedProx proximal term strength |
+| `--lr` | | `2e-5` | Learning rate |
+| `--seed` | | `42` | Random seed |
 
 ## Federated Learning Algorithms
 
-| Algorithm | Description | Key Parameter |
-|-----------|-------------|---------------|
-| **FedAvg** | Baseline weighted averaging | - |
-| **FedProx** | Proximal term for drift control | `mu` (regularization) |
-| **SCAFFOLD** | Control variates for variance reduction | - |
+### FedAvg (Baseline)
+Standard federated averaging: clients train locally, server averages parameters weighted by sample count.
+
+### FedProx
+Adds proximal regularization to limit client drift:
+
+```
+L_local = L_task + (μ/2) ||w - w_global||²
+```
+
+The proximal term penalizes deviation from the global model, reducing client divergence under heterogeneous data.
+
+## Non-IID Data Generation
+
+We use **Dirichlet-based label allocation** to create controlled heterogeneity:
+
+```python
+p_k ~ Dir(α · 1_C)  # Sample label proportions for client k
+```
+
+| Alpha (α) | Heterogeneity | Effect |
+|-----------|---------------|--------|
+| α → ∞ | None (IID) | Uniform label distribution |
+| α = 1.0 | Low | Slight imbalance |
+| α = 0.1 | High | Significant skew |
+| α = 0.01 | Extreme | Near single-class clients |
 
 ## Metrics Tracked
 
-### Language Quality
-- Perplexity
-- Validation loss
+- **Test Accuracy**: Classification accuracy on held-out test set
+- **Training Loss**: Average loss across clients
+- **Client Divergence**: L2 distance between client parameters and their mean
 
-### Training Stability
-- Gradient norm variance
-- Client update divergence
-- Weight cosine drift
+## Model Configuration
 
-### Failure Detection
-- Divergence detection
-- Oscillation detection
-- Client drift monitoring
-- Convergence speed analysis
+| Parameter | Value |
+|-----------|-------|
+| Model | DistilBERT (66M params) |
+| Trainable | ~15M (22%) - last 2 layers + classifier |
+| Dataset | AG News (4 classes) |
+| Sequence Length | 64 tokens |
+| Optimizer | AdamW |
 
-## Configuration Options
+## Results
 
-```yaml
-model:
-  name: distilgpt2          # distilgpt2, gpt2, tinyllama, qwen-0.5b
-  lora_r: 8                 # LoRA rank
-  lora_alpha: 16            # LoRA alpha
-  max_length: 128           # Sequence length
+### Main Experiments
+![Accuracy](results/plots/main_accuracy.png)
+![Divergence](results/plots/main_divergence.png)
 
-data:
-  dataset: ag_news          # ag_news, wikitext
-  partition_strategy: topic_skew
-  num_clients: 10
-  alpha: 0.1                # Dirichlet concentration
+### Failure Modes
+- **Extreme skew (α=0.01)**: 80.6% accuracy, slow convergence
+- **High LR (1e-3)**: 70.4% accuracy, catastrophic divergence (~21)
+- **Many clients (K=10)**: 88.2% accuracy (improved!)
 
-federated:
-  algorithm: fedavg         # fedavg, fedprox, scaffold
-  num_rounds: 50
-  participation_rate: 1.0
-  local_epochs: 1
-  learning_rate: 5e-5
-  mu: 0.01                  # FedProx only
+## LaTeX Report
+
+A complete IEEE-format research report is available:
+
+```bash
+# Compile the report
+pdflatex report.tex
 ```
-
-## Expected Results
-
-The experiments will reveal:
-1. **IID baseline**: Stable convergence across all algorithms
-2. **Topic skew**: FedAvg diverges, FedProx/SCAFFOLD handle better
-3. **Style skew**: Syntactic drift causes gradient variance
-4. **Token skew**: Vocabulary bias affects all algorithms
-5. **Low participation**: Oscillation and slow convergence
-6. **High learning rate**: Divergence especially under non-IID
 
 ## References
 
 - **FedAvg**: McMahan et al., "Communication-Efficient Learning of Deep Networks from Decentralized Data", AISTATS 2017
 - **FedProx**: Li et al., "Federated Optimization in Heterogeneous Networks", MLSys 2020
-- **SCAFFOLD**: Karimireddy et al., "SCAFFOLD: Stochastic Controlled Averaging for Federated Learning", ICML 2020
+
+## Authors
+
+- Aviral Vishesh Goel (IIT Bombay)
+- Adit Srivastava (IIT Bombay)
+- Aagam Shah (IIT Bombay)
+
+## License
+
+MIT License
